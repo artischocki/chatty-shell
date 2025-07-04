@@ -1,0 +1,2 @@
+class MissingPrompException(Exception):
+    pass
