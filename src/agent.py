@@ -7,7 +7,7 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import MemorySaver
 
-from exceptions import MissingPrompException
+from exceptions import MissingPromptException
 
 API_KEY = "OPENAI_API_KEY"
 
@@ -40,8 +40,7 @@ def get_agent_executor(
         # get new chat history
         memory = _get_memory()
     if system_prompt == "":
-        # raise MissingPrompException
-        system_prompt = "You are a terminal agent."
+        raise MissingPromptException
 
     agent_executor = create_react_agent(
         model=llm, tools=tools, prompt=system_prompt, checkpointer=memory

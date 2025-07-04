@@ -1,94 +1,24 @@
 # terminal_agent.py
 from langchain_core.messages import HumanMessage
-from tools import shell
 from agent import get_agent_executor
 from pydantic import BaseModel
 
-import textwrap
-import shutil
-import sys
+from messages import sort_tools_calls
+from tools import shell
+from system_prompt import system_prompt
+
+from out import print_banner, clear_last_line, print_ai_bubble, print_user_bubble
+import pprint
 
 # Define model and tools
 tools = [shell]
 
 # Create the React agent
-agent_executor = get_agent_executor(tools)
+agent_executor = get_agent_executor(tools=tools, system_prompt=system_prompt)
 
 
 class ChatInput(BaseModel):
     message: str
-
-
-def get_width():
-    return shutil.get_terminal_size().columns
-
-
-def wrap_preserve_newlines(text: str, width: int):
-    """
-    Split text on '\n', wrap each paragraph at `width`, and preserve blank lines.
-    Returns a flat list of lines.
-    """
-    lines = []
-    for para in text.split("\n"):
-        if para:
-            wrapped = textwrap.wrap(para, width=width) or [""]
-            lines.extend(wrapped)
-        else:
-            # explicit blank line
-            lines.append("")
-    return lines
-
-
-def print_user_bubble(text: str):
-    term_w = get_width()
-    max_total = int(term_w * 3 / 4)
-    max_inner = max_total - 4
-
-    # preserve newlines, then wrap
-    lines = wrap_preserve_newlines(text, max_inner)
-    actual_inner = max(len(line) for line in lines)
-    bubble_w = actual_inner + 4
-    indent = term_w - bubble_w
-
-    print(" " * indent + "╭" + "─" * (actual_inner + 2) + "╮")
-    for line in lines:
-        print(" " * indent + "│ " + line.ljust(actual_inner) + " │")
-    print(" " * indent + "╰" + "─" * (actual_inner + 2) + "╯")
-
-
-def print_ai_bubble(text: str):
-    term_w = get_width()
-    max_total = int(term_w * 3 / 4)
-    max_inner = max_total - 4
-
-    lines = wrap_preserve_newlines(text, max_inner)
-    actual_inner = max(len(line) for line in lines)
-
-    print("╭" + "─" * (actual_inner + 2) + "╮")
-    for line in lines:
-        print("│ " + line.ljust(actual_inner) + " │")
-    print("╰" + "─" * (actual_inner + 2) + "╯")
-
-
-def print_banner():
-    width = get_width()
-    line = "━" * width
-    print(line)
-    print("🧠 OpenAI Chat Agent — type 'exit' to quit".center(width))
-
-
-def print_output(text: str):
-    width = get_width()
-    print("\n🤖 Assistant:\n")
-    print(textwrap.fill(text, width=width))
-    print()
-
-
-def clear_last_line():
-    # Move cursor up and clear the line (ANSI escape sequences)
-    sys.stdout.write("\033[F")  # Move cursor up one line
-    sys.stdout.write("\033[K")  # Clear line
-    sys.stdout.flush()
 
 
 def main():
@@ -113,8 +43,18 @@ def main():
                     "recursion_limit": 100,
                 },
             )
-
             messages = result.get("messages", [])
+
+            new_messages = []
+            for i in range(len(messages)):
+                if isinstance(messages[::-1][i], HumanMessage):
+                    new_messages = messages[-i:]
+                    break
+
+            sorted_tool_calls = sort_tools_calls(new_messages)
+
+            pprint.pp(sorted_tool_calls)
+            print()
             print_ai_bubble(messages[-1].content)
 
         except KeyboardInterrupt:
