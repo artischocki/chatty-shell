@@ -23,19 +23,33 @@ def get_width():
     return shutil.get_terminal_size().columns
 
 
+def wrap_preserve_newlines(text: str, width: int):
+    """
+    Split text on '\n', wrap each paragraph at `width`, and preserve blank lines.
+    Returns a flat list of lines.
+    """
+    lines = []
+    for para in text.split("\n"):
+        if para:
+            wrapped = textwrap.wrap(para, width=width) or [""]
+            lines.extend(wrapped)
+        else:
+            # explicit blank line
+            lines.append("")
+    return lines
+
+
 def print_user_bubble(text: str):
     term_w = get_width()
     max_total = int(term_w * 3 / 4)
     max_inner = max_total - 4
 
-    wrapped = textwrap.fill(text, width=max_inner)
-    lines = wrapped.splitlines()
-
+    # preserve newlines, then wrap
+    lines = wrap_preserve_newlines(text, max_inner)
     actual_inner = max(len(line) for line in lines)
     bubble_w = actual_inner + 4
     indent = term_w - bubble_w
 
-    # right-aligned bubble
     print(" " * indent + "╭" + "─" * (actual_inner + 2) + "╮")
     for line in lines:
         print(" " * indent + "│ " + line.ljust(actual_inner) + " │")
@@ -47,12 +61,8 @@ def print_ai_bubble(text: str):
     max_total = int(term_w * 3 / 4)
     max_inner = max_total - 4
 
-    wrapped = textwrap.fill(text, width=max_inner)
-    lines = wrapped.splitlines()
-
+    lines = wrap_preserve_newlines(text, max_inner)
     actual_inner = max(len(line) for line in lines)
-    # left-aligned bubble: indent = 0
-    indent = 0
 
     print("╭" + "─" * (actual_inner + 2) + "╮")
     for line in lines:
