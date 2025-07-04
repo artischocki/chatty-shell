@@ -54,6 +54,43 @@ def print_ai_bubble(text: str):
     print("╰" + "─" * (actual_inner + 2) + "╯")
 
 
+def print_tool_bubble(command: str, response: str):
+    term_w = get_width()
+    max_total = int(term_w * 3 / 4)
+    max_inner = max_total - 4  # account for borders/padding
+
+    # prepare lines
+    cmd_lines = wrap_preserve_newlines(command, max_inner)
+    resp_lines = wrap_preserve_newlines(response, max_inner)
+
+    # find longest line among both
+    actual_inner = max(
+        max((len(l) for l in cmd_lines), default=0),
+        max((len(l) for l in resp_lines), default=0),
+    )
+
+    # bubble width and indent (left-aligned here)
+    bubble_w = actual_inner + 4
+    indent = 0
+
+    # top border
+    print(" " * indent + "╭" + "─" * (actual_inner + 2) + "╮")
+
+    # command section
+    for line in cmd_lines:
+        print(" " * indent + "│ " + line.ljust(actual_inner) + " │")
+
+    # separator
+    print(" " * indent + "├" + "─" * (actual_inner + 2) + "┤")
+
+    # response section
+    for line in resp_lines:
+        print(" " * indent + "│ " + line.ljust(actual_inner) + " │")
+
+    # bottom border
+    print(" " * indent + "╰" + "─" * (actual_inner + 2) + "╯")
+
+
 def print_banner():
     width = get_width()
     line = "━" * width

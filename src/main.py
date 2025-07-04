@@ -7,7 +7,13 @@ from messages import sort_tools_calls
 from tools import shell
 from system_prompt import system_prompt
 
-from out import print_banner, clear_last_line, print_ai_bubble, print_user_bubble
+from out import (
+    print_banner,
+    clear_last_line,
+    print_ai_bubble,
+    print_user_bubble,
+    print_tool_bubble,
+)
 import pprint
 
 # Define model and tools
@@ -53,8 +59,11 @@ def main():
 
             sorted_tool_calls = sort_tools_calls(new_messages)
 
-            pprint.pp(sorted_tool_calls)
-            print()
+            if sorted_tool_calls:
+                for command in sorted_tool_calls:
+                    print_tool_bubble(command, sorted_tool_calls[command])
+            # pprint.pp(sorted_tool_calls)
+            # print()
             print_ai_bubble(messages[-1].content)
 
         except KeyboardInterrupt:
