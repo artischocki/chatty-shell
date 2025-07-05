@@ -22,31 +22,31 @@ class View:
     """
 
     def __init__(self, *, human_queue: Queue, ai_queue: Queue):
-        """
-        Initialize the view with queues for outgoing human messages and incoming AI/tool responses.
-        """
-        # IPC queues
-        self.human_queue: Queue = human_queue
-        self.ai_queue: Queue = ai_queue
+        # default input height (will grow later in _recalculate_layout)
+        self.input_h = 3
 
-        # Chat state
-        self.messages: List[Tuple[str, str]] = []  # (text, author)
+        # IPC queues
+        self.human_queue = human_queue
+        self.ai_queue = ai_queue
+
+        # Chat state...
+        self.messages: List[Tuple[str, str]] = []
         self.input_buffer: str = ""
         self.chat_offset: int = 0
         self.chat_scroll_speed: int = 3
 
-        # Sidebar state
-        self.tool_calls: List[Dict[str, str]] = []  # list of {cmd: output}
+        # Sidebar state...
         self.sidebar_offset: int = 0
+        self.tool_calls: List[Dict[str, str]] = []
 
-        # Debug overlay
+        # Debug...
         self.debug_messages: List[str] = []
         self.show_debug: bool = False
 
-        # Color attributes (set in curses init)
-        self.default_attr: int = 0
-        self.code_attr: int = 0
-        self.cmd_attr: int = 0
+        # Color attrs (filled in _init_curses)...
+        self.default_attr = 0
+        self.code_attr = 0
+        self.cmd_attr = 0
 
     def run(self) -> None:
         """
@@ -104,12 +104,13 @@ class View:
     def _init_windows(self, stdscr) -> None:
         """
         Create and initialize the chat, sidebar, input, and debug windows.
+        Chat + input share the left width; sidebar runs full height on the right.
         """
         h, w = stdscr.getmaxyx()
         self.height, self.width = h, w
         self.sidebar_w = max(20, w // 4)
         self.chat_w = w - self.sidebar_w
-        self.input_h = 3
+        # input_h was set by _recalculate_layout (or defaults to 3)
         self.chat_h = h - self.input_h
 
         def setup(win):
@@ -118,18 +119,53 @@ class View:
             win.box()
             win.refresh()
 
+        # left: chat area
         self.chat_win = curses.newwin(self.chat_h, self.chat_w, 0, 0)
-        self.sidebar_win = curses.newwin(self.chat_h, self.sidebar_w, 0, self.chat_w)
-        self.input_win = curses.newwin(self.input_h, w, self.chat_h, 0)
-        self.debug_win = curses.newwin(h, w, 0, 0)
+        setup(self.chat_win)
+        # right: sidebar full height
+        self.sidebar_win = curses.newwin(self.height, self.sidebar_w, 0, self.chat_w)
+        setup(self.sidebar_win)
+        # bottom-left: input, same width as chat
+        self.input_win = curses.newwin(self.input_h, self.chat_w, self.chat_h, 0)
+        setup(self.input_win)
+        # full-screen debug overlay
+        self.debug_win = curses.newwin(self.height, w, 0, 0)
+        setup(self.debug_win)
 
-        for win in (self.chat_win, self.sidebar_win, self.input_win, self.debug_win):
-            setup(win)
+    def _recalculate_layout(self) -> None:
+        """
+        Recompute chat_h and input_h based on current input_buffer.
+        Resize chat and input windows; leave sidebar at full height.
+        """
+        inner_w = self.chat_w - 3  # account for borders
+        lines: list[str] = []
+        for para in self.input_buffer.split("\n"):
+            wrapped = textwrap.wrap(para, width=inner_w) or [""]
+            lines.extend(wrapped)
+
+        # new height = top border + lines + bottom border
+        new_input_h = len(lines) + 2
+        max_h = self.height - 3
+        new_input_h = min(new_input_h, max_h)
+
+        if new_input_h == self.input_h:
+            return
+
+        self.input_h = new_input_h
+        self.chat_h = self.height - self.input_h
+
+        # resize/move chat
+        self.chat_win.resize(self.chat_h, self.chat_w)
+        # resize/move input (same width as chat)
+        self.input_win.resize(self.input_h, self.chat_w)
+        self.input_win.mvwin(self.chat_h, 0)
+        # sidebar stays full height; debug stays full screen
 
     def _draw_all(self) -> None:
         """
-        Draw all panes and update the screen.
+        Before each frame, recalc sizes then draw all panes.
         """
+        self._recalculate_layout()
         self._draw_chat()
         self._draw_sidebar()
         self._draw_input()
@@ -142,6 +178,7 @@ class View:
         win = self.chat_win
         win.erase()
         win.box()
+        win.addstr(0, 2, " Chat ", self.default_attr)
 
         flat = self._flatten_chat()
         self.last_chat_map = flat
@@ -166,33 +203,53 @@ class View:
 
     def _draw_sidebar(self) -> None:
         """
-        Render tool call commands and their outputs in a scrollable sidebar.
+        Render the sidebar (full-height) with scrolling.
         """
         win = self.sidebar_win
         win.erase()
         win.box()
+        win.addstr(0, 2, " Terminal Session ", self.default_attr)
 
         flat = self._flatten_sidebar()
-        visible = self.chat_h - 2
+        visible = self.height - 2
         total = len(flat)
         max_off = max(0, total - visible)
         self.sidebar_offset = min(max_off, max(0, self.sidebar_offset))
 
-        segment = flat[self.sidebar_offset : self.sidebar_offset + visible]
-        for row, (text, attr) in enumerate(segment, start=1):
+        for row, (text, attr) in enumerate(
+            flat[self.sidebar_offset : self.sidebar_offset + visible], start=1
+        ):
             win.addstr(row, 1, text, attr)
 
         win.refresh()
 
     def _draw_input(self) -> None:
         """
-        Render the user input prompt at the bottom.
+        Render the input window, growing to fit the input, with a '> ' prompt
+        at the start of the first line.
         """
         win = self.input_win
         win.erase()
         win.box()
-        prompt = "> " + self.input_buffer[: self.width - 3]
-        win.addstr(1, 1, prompt, self.default_attr)
+
+        inner_w = self.width - 3
+
+        # wrap each paragraph to fit, preserving explicit newlines
+        lines: List[str] = []
+        for para in self.input_buffer.split("\n"):
+            wrapped = textwrap.wrap(para, width=inner_w) or [""]
+            lines.extend(wrapped)
+
+        # only display as many lines as will fit
+        visible = self.input_h - 2
+        display = lines[-visible:]
+
+        for idx, line in enumerate(display, start=1):
+            # first line gets the prompt, subsequent lines get two spaces
+            prefix = "> " if idx == 1 else "  "
+            text = prefix + line
+            win.addstr(idx, 1, text, self.default_attr)
+
         win.refresh()
 
     def _draw_debug(self) -> None:
@@ -287,6 +344,8 @@ class View:
     def _handle_input(self) -> None:
         """
         Read and process all pending key and mouse events.
+        Any Enter (KEY_ENTER, 10, 13) sends the message,
+        unless part of a multi-key paste (then treated as space).
         """
         keys: List[int] = []
         while True:
@@ -301,18 +360,28 @@ class View:
         for key in keys:
             if key == curses.KEY_MOUSE:
                 self._handle_mouse()
-            elif key == curses.KEY_F2:
+                continue
+
+            if key == curses.KEY_F2:
                 self.show_debug = True
-            elif key in (curses.KEY_ENTER, 10, 13):
+                continue
+
+            # Enter / Return: send or, in a paste burst, insert space
+            if key in (curses.KEY_ENTER, 10, 13):
                 if burst:
                     self.input_buffer += " "
                 else:
                     self._send_human()
-            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                continue
+
+            if key in (curses.KEY_BACKSPACE, 127, 8):
                 self.input_buffer = self.input_buffer[:-1]
-            elif key == 27:  # ESC
+                continue
+
+            if key == 27:  # ESC
                 exit()
-            elif 32 <= key < 256:
+
+            if 32 <= key < 256:
                 self.input_buffer += chr(key)
 
     def _send_human(self) -> None:

@@ -1,3 +1,3 @@
 - coloring of code (pygments, but package conflicts)
 - prompting
-- 
+- shift enter for new_line
