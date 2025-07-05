@@ -1,4 +1,3 @@
-# terminal_agent.py
 from langchain_core.messages import HumanMessage
 from agent import get_agent_executor
 from pydantic import BaseModel

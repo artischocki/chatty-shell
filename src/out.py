@@ -34,7 +34,7 @@ def print_user_bubble(text: str):
     bubble_w = actual_inner + 4
     indent = term_w - bubble_w
 
-    print(" " * indent + "╭" + "─" * (actual_inner + 2) + "╮")
+    print(" " * indent + "╭" + "─" * (actual_inner) + "🤓" + "╮")
     for line in lines:
         print(" " * indent + "│ " + line.ljust(actual_inner) + " │")
     print(" " * indent + "╰" + "─" * (actual_inner + 2) + "╯")
@@ -48,7 +48,7 @@ def print_ai_bubble(text: str):
     lines = wrap_preserve_newlines(text, max_inner)
     actual_inner = max(len(line) for line in lines)
 
-    print("╭" + "─" * (actual_inner + 2) + "╮")
+    print("╭" + "🤖" + "─" * (actual_inner) + "╮")
     for line in lines:
         print("│ " + line.ljust(actual_inner) + " │")
     print("╰" + "─" * (actual_inner + 2) + "╯")
@@ -74,7 +74,7 @@ def print_tool_bubble(command: str, response: str):
     indent = 0
 
     # top border
-    print(" " * indent + "╭" + "─" * (actual_inner + 2) + "╮")
+    print(" " * indent + "╭" + "🛠️" + "─" * (actual_inner) + "╮")
 
     # command section
     for line in cmd_lines:
