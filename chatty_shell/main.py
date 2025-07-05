@@ -3,11 +3,11 @@ from pydantic import BaseModel
 from dotenv import load_dotenv, find_dotenv
 import os
 
-from chatty_shell.agents.agent import get_agent_executor
-from chatty_shell.messages import sort_tools_calls
-from chatty_shell.tools import shell
-from chatty_shell.prompts.system_prompt import system_prompt
-from chatty_shell.ascii.out import (
+from chatty_shell.backend.agent import get_agent_executor
+from chatty_shell.backend.messages import sort_tools_calls
+from chatty_shell.backend.tools import shell_tool
+from chatty_shell.backend.prompts import system_prompt
+from chatty_shell.frontend.ascii.out import (
     print_banner,
     clear_last_line,
     print_ai_bubble,
@@ -18,7 +18,7 @@ from chatty_shell.ascii.out import (
 
 def get_agent(api_token: str):
     # Define model and tools
-    tools = [shell]
+    tools = [shell_tool]
     # Create the React agent
     agent_executor = get_agent_executor(
         tools=tools, system_prompt=system_prompt, token=api_token

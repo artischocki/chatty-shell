@@ -7,7 +7,10 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import MemorySaver
 
-from chatty_shell.exceptions import MissingPromptException, MissingTokenException
+from chatty_shell.backend.exceptions import (
+    MissingPromptException,
+    MissingTokenException,
+)
 
 API_KEY = "OPENAI_API_KEY"
 

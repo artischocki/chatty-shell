@@ -3,7 +3,7 @@ import subprocess
 
 
 @tool
-def shell(command: str) -> str:
+def shell_tool(command: str) -> str:
     """Executes a shell command and returns the output."""
     try:
         result = subprocess.check_output(
