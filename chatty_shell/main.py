@@ -3,11 +3,11 @@ from pydantic import BaseModel
 from dotenv import load_dotenv, find_dotenv
 import os
 
-from chatty_shell.agent import get_agent_executor
+from chatty_shell.agents.agent import get_agent_executor
 from chatty_shell.messages import sort_tools_calls
 from chatty_shell.tools import shell
-from chatty_shell.system_prompt import system_prompt
-from chatty_shell.out import (
+from chatty_shell.prompts.system_prompt import system_prompt
+from chatty_shell.ascii.out import (
     print_banner,
     clear_last_line,
     print_ai_bubble,
