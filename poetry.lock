@@ -607,6 +607,17 @@ toml = ["tomli (>=2.0.1)"]
 yaml = ["pyyaml (>=6.0.1)"]
 
 [[package]]
+name = "pygments"
+version = "2.19.2"
+description = "Pygments is a syntax highlighting package written in Python."
+category = "main"
+optional = false
+python-versions = ">=3.8"
+
+[package.extras]
+windows-terminal = ["colorama (>=0.4.6)"]
+
+[[package]]
 name = "pyperclip"
 version = "1.9.0"
 description = "A cross-platform clipboard module for Python. (Only handles plain text for now.)"
@@ -843,7 +854,7 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "1321b5964d1b9c9367bd0ee224f78d536094684e336e9fa180bc672947e8659e"
+content-hash = "12c5645c3691405a9d05c2db227dee79e0b1327169f2f11916a281cd787535bc"
 
 [metadata.files]
 aiohappyeyeballs = []
@@ -893,6 +904,7 @@ pycparser = []
 pydantic = []
 pydantic-core = []
 pydantic-settings = []
+pygments = []
 pyperclip = []
 python-dotenv = []
 pyyaml = []

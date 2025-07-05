@@ -1,130 +1,98 @@
+# chatty_shell/frontend/ascii.py
+
 import shutil
 import textwrap
-import sys
+import re
+from typing import List, Tuple
 
 
-def get_width():
+def get_width() -> int:
     return shutil.get_terminal_size().columns
 
 
-def wrap_preserve_newlines(text: str, width: int):
+def wrap_preserve_newlines(text: str, width: int) -> List[str]:
     """
     Split text on '\n', wrap each paragraph at `width`, and preserve blank lines.
     Returns a flat list of lines.
     """
-    lines = []
+    lines: List[str] = []
     for para in text.split("\n"):
         if para:
             wrapped = textwrap.wrap(para, width=width) or [""]
             lines.extend(wrapped)
         else:
-            # explicit blank line
             lines.append("")
     return lines
 
 
-def print_user_bubble(text: str):
-    # deprecated, remove in v0.2.0
-    term_w = get_width()
-    max_total = int(term_w * 3 / 4)
-    max_inner = max_total - 4
+def wrap_message(message: str, panel_w: int, type: str) -> List[Tuple[str, bool]]:
+    """
+    Returns a list of (ascii_line, is_code) for the chat bubble.
+    - Preserves your old ╭─…│…│╰─…╯ framing with 🤓 / 🤖
+    - If there's a ```lang\n…``` block, strips the backticks,
+      inserts a “[lang]” line immediately above the code,
+      and flags only the code lines (not the lang header) as is_code=True.
+    """
 
-    # preserve newlines, then wrap
-    lines = wrap_preserve_newlines(text, max_inner)
-    actual_inner = max(len(line) for line in lines)
-    bubble_w = actual_inner + 4
-    indent = term_w - bubble_w
-
-    print(" " * indent + "╭" + "─" * (actual_inner) + "🤓" + "╮")
-    for line in lines:
-        print(" " * indent + "│ " + line.ljust(actual_inner) + " │")
-    print(" " * indent + "╰" + "─" * (actual_inner + 2) + "╯")
-
-
-def wrap_message(message: str, panel_w: int, type: str):
+    # 1) compute wrapping widths
     max_total = int(panel_w * 3 / 4)
     max_inner = max_total - 4
 
-    # preserve newlines, then wrap
-    lines = wrap_preserve_newlines(message, max_inner)
-    actual_inner = max(len(line) for line in lines)
+    # 2) detect a single code‐fence
+    fence_re = re.compile(r"```(\w+)?\n([\s\S]*?)```")
+    m = fence_re.search(message)
 
-    wrapped_lines = []
-    if type == "human":
-        wrapped_lines.append("╭" + "─" * (actual_inner + 1) + "🤓 ")
-    elif type == "ai":
-        wrapped_lines.append("🤖" + "─" * (actual_inner + 1) + "╮")
+    parts: List[Tuple[str, bool]] = []
+
+    if m:
+        lang = m.group(1)  # e.g. "python" or None
+        code_body = m.group(2)
+        before = message[: m.start()]
+        after = message[m.end() :]
+
+        # text before
+        parts += [(ln, False) for ln in wrap_preserve_newlines(before, max_inner)]
+        # lang header
+        if lang:
+            parts.append((f"[{lang}]", False))
+        # code lines (raw, unwrapped)
+        for code_line in code_body.splitlines():
+            parts.append((code_line, True))
+        # text after
+        parts += [(ln, False) for ln in wrap_preserve_newlines(after, max_inner)]
     else:
-        raise ValueError("Type of message should be 'human' or 'ai'!")
+        # no fence: treat entire message as plain text
+        parts += [(ln, False) for ln in wrap_preserve_newlines(message, max_inner)]
 
-    for line in lines:
-        wrapped_lines.append("│ " + line.ljust(actual_inner) + " │")
+    # 3) wrap non‐code segments to max_inner
+    wrapped: List[Tuple[str, bool]] = []
+    for seg, is_code in parts:
+        if is_code:
+            # leave code lines as‐is
+            wrapped.append((seg, True))
+        else:
+            for ln in textwrap.wrap(seg, width=max_inner) or [""]:
+                wrapped.append((ln, False))
 
-    wrapped_lines.append("╰" + "─" * (actual_inner + 2) + "╯")
+    # 4) measure the widest line
+    actual_inner = max((len(ln) for ln, _ in wrapped), default=0)
 
-    return wrapped_lines
-
-
-def print_ai_bubble(text: str):
-    term_w = get_width()
-    max_total = int(term_w * 3 / 4)
-    max_inner = max_total - 4
-
-    lines = wrap_preserve_newlines(text, max_inner)
-    actual_inner = max(len(line) for line in lines)
-
-    print("╭" + "🤖" + "─" * (actual_inner) + "╮")
-    for line in lines:
-        print("│ " + line.ljust(actual_inner) + " │")
-    print("╰" + "─" * (actual_inner + 2) + "╯")
-
-
-def print_tool_bubble(command: str, response: str):
-    term_w = get_width()
-    max_total = int(term_w * 3 / 4)
-    max_inner = max_total - 4  # account for borders/padding
-
-    # prepare lines
-    cmd_lines = wrap_preserve_newlines(command, max_inner)
-    resp_lines = wrap_preserve_newlines(response, max_inner)
-
-    # find longest line among both
-    actual_inner = max(
-        max((len(l) for l in cmd_lines), default=0),
-        max((len(l) for l in resp_lines), default=0),
-    )
-
-    # bubble width and indent (left-aligned here)
-    bubble_w = actual_inner + 4
-    indent = 0
+    # 5) build the bubble
+    bubble: List[Tuple[str, bool]] = []
 
     # top border
-    print(" " * indent + "╭" + "🛠️" + "─" * (actual_inner) + "╮")
+    if type == "human":
+        bubble.append(("╭" + "─" * (actual_inner + 1) + "🤓 ", False))
+    elif type == "ai":
+        bubble.append(("🤖" + "─" * (actual_inner + 1) + "╮", False))
+    else:
+        raise ValueError("Type must be 'human' or 'ai'")
 
-    # command section
-    for line in cmd_lines:
-        print(" " * indent + "│ " + line.ljust(actual_inner) + " │")
-
-    # separator
-    print(" " * indent + "├" + "─" * (actual_inner + 2) + "┤")
-
-    # response section
-    for line in resp_lines:
-        print(" " * indent + "│ " + line.ljust(actual_inner) + " │")
+    # interior lines
+    for ln, is_code in wrapped:
+        bubble.append(("│ " + ln.ljust(actual_inner) + " │", is_code))
 
     # bottom border
-    print(" " * indent + "╰" + "─" * (actual_inner + 2) + "╯")
+    bubble.append(("╰" + "─" * (actual_inner + 2) + "╯", False))
 
-
-def print_banner():
-    width = get_width()
-    line = "━" * width
-    print(line)
-    print("🧠 OpenAI Chat Agent — type 'exit' to quit".center(width))
-
-
-def clear_last_line():
-    # Move cursor up and clear the line (ANSI escape sequences)
-    sys.stdout.write("\033[F")  # Move cursor up one line
-    sys.stdout.write("\033[K")  # Clear line
-    sys.stdout.flush()
+    return bubble
