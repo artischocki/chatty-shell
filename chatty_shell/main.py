@@ -1,33 +1,62 @@
 from langchain_core.messages import HumanMessage
-from agent import get_agent_executor
 from pydantic import BaseModel
+from dotenv import load_dotenv, find_dotenv
+import os
 
-from messages import sort_tools_calls
-from tools import shell
-from system_prompt import system_prompt
-
-from out import (
+from chatty_shell.agent import get_agent_executor
+from chatty_shell.messages import sort_tools_calls
+from chatty_shell.tools import shell
+from chatty_shell.system_prompt import system_prompt
+from chatty_shell.out import (
     print_banner,
     clear_last_line,
     print_ai_bubble,
     print_user_bubble,
     print_tool_bubble,
 )
-import pprint
 
-# Define model and tools
-tools = [shell]
 
-# Create the React agent
-agent_executor = get_agent_executor(tools=tools, system_prompt=system_prompt)
+def get_agent(api_token: str):
+    # Define model and tools
+    tools = [shell]
+    # Create the React agent
+    agent_executor = get_agent_executor(
+        tools=tools, system_prompt=system_prompt, token=api_token
+    )
+    return agent_executor
 
 
 class ChatInput(BaseModel):
     message: str
 
 
+def get_api_token() -> str:
+    # return env var if set
+    token = os.getenv("OPENAI_API_KEY")
+    if token:
+        return token
+
+    # Locate or create .env
+    env_path = find_dotenv(usecwd=True) or os.path.join(os.getcwd(), ".env")
+    load_dotenv(env_path)
+    token = os.getenv("OPENAI_API_KEY")
+    if token:
+        return token
+
+    # Prompt once and persist if missing
+    token = input("🔑 Enter your OpenAI API key: ").strip()
+    with open(env_path, "a") as f:
+        f.write(f"\nOPENAI_API_KEY={token}\n")
+    load_dotenv(env_path)
+    return token
+
+
 def main():
     print_banner()
+
+    # Authenticate
+    api_token = get_api_token()
+    agent_executor = get_agent(api_token)
 
     while True:
         try:

@@ -7,19 +7,19 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import MemorySaver
 
-from exceptions import MissingPromptException
+from chatty_shell.exceptions import MissingPromptException, MissingTokenException
 
 API_KEY = "OPENAI_API_KEY"
 
 
-def _get_llm(model: str | None = None) -> ChatOpenAI:
+def _get_llm(model: str | None = None, api_token: str | None = None) -> ChatOpenAI:
+    if api_token is None:
+        raise MissingTokenException
     # default model is gpt-3.5-turbo
     if model is None:
         model = "gpt-3.5-turbo"
-    if not os.environ.get(API_KEY):
-        os.environ[API_KEY] = getpass.getpass("Enter your OpenAI-API key: ")
 
-    llm = ChatOpenAI(model=model)
+    llm = ChatOpenAI(model=model, api_key=api_token)
     return llm
 
 
@@ -29,13 +29,14 @@ def _get_memory():
 
 def get_agent_executor(
     tools: list[BaseTool],
+    token: str,
     llm: ChatOpenAI | None = None,
     memory: MemorySaver | None = None,
     system_prompt: str = "",
 ) -> Runnable:
     if llm is None:
         # get default llm
-        llm = _get_llm()
+        llm = _get_llm(api_token=token)
     if memory is None:
         # get new chat history
         memory = _get_memory()
