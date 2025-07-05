@@ -1,6 +1,5 @@
-import curses
-from chatty_shell.frontend.presenter import presenter
-
+from chatty_shell.presenter.presenter import Presenter
 
 if __name__ == "__main__":
-    curses.wrapper(presenter)
+    presenter = Presenter()
+    presenter.run()

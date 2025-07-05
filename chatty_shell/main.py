@@ -7,9 +7,7 @@ from chatty_shell.backend.agent import get_agent_executor
 from chatty_shell.backend.messages import sort_tools_calls
 from chatty_shell.backend.tools import shell_tool
 from chatty_shell.backend.prompts import system_prompt
-from chatty_shell.frontend.ascii.out import (
-    print_banner,
-    clear_last_line,
+from chatty_shell.frontend.ascii import (
     print_ai_bubble,
     print_user_bubble,
     print_tool_bubble,

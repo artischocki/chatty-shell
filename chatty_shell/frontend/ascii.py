@@ -24,6 +24,7 @@ def wrap_preserve_newlines(text: str, width: int):
 
 
 def print_user_bubble(text: str):
+    # deprecated, remove in v0.2.0
     term_w = get_width()
     max_total = int(term_w * 3 / 4)
     max_inner = max_total - 4
@@ -38,6 +39,30 @@ def print_user_bubble(text: str):
     for line in lines:
         print(" " * indent + "│ " + line.ljust(actual_inner) + " │")
     print(" " * indent + "╰" + "─" * (actual_inner + 2) + "╯")
+
+
+def wrap_message(message: str, panel_w: int, type: str):
+    max_total = int(panel_w * 3 / 4)
+    max_inner = max_total - 4
+
+    # preserve newlines, then wrap
+    lines = wrap_preserve_newlines(message, max_inner)
+    actual_inner = max(len(line) for line in lines)
+
+    wrapped_lines = []
+    if type == "human":
+        wrapped_lines.append("╭" + "─" * (actual_inner + 1) + "🤓 ")
+    elif type == "ai":
+        wrapped_lines.append("🤖" + "─" * (actual_inner + 1) + "╮")
+    else:
+        raise ValueError("Type of message should be 'human' or 'ai'!")
+
+    for line in lines:
+        wrapped_lines.append("│ " + line.ljust(actual_inner) + " │")
+
+    wrapped_lines.append("╰" + "─" * (actual_inner + 2) + "╯")
+
+    return wrapped_lines
 
 
 def print_ai_bubble(text: str):

@@ -487,14 +487,6 @@ python-versions = ">=3.8"
 
 [[package]]
 name = "numpy"
-version = "2.2.6"
-description = "Fundamental package for array computing in Python"
-category = "main"
-optional = false
-python-versions = ">=3.10"
-
-[[package]]
-name = "numpy"
 version = "2.3.1"
 description = "Fundamental package for array computing in Python"
 category = "main"
@@ -613,6 +605,14 @@ azure-key-vault = ["azure-identity (>=1.16.0)", "azure-keyvault-secrets (>=4.8.0
 gcp-secret-manager = ["google-cloud-secret-manager (>=2.23.1)"]
 toml = ["tomli (>=2.0.1)"]
 yaml = ["pyyaml (>=6.0.1)"]
+
+[[package]]
+name = "pyperclip"
+version = "1.9.0"
+description = "A cross-platform clipboard module for Python. (Only handles plain text for now.)"
+category = "main"
+optional = false
+python-versions = "*"
 
 [[package]]
 name = "python-dotenv"
@@ -843,7 +843,7 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.10"
-content-hash = "4162798d509c5473270cd207397df6c8ce40a858001d580bc7537f54e05fc160"
+content-hash = "1321b5964d1b9c9367bd0ee224f78d536094684e336e9fa180bc672947e8659e"
 
 [metadata.files]
 aiohappyeyeballs = []
@@ -893,6 +893,7 @@ pycparser = []
 pydantic = []
 pydantic-core = []
 pydantic-settings = []
+pyperclip = []
 python-dotenv = []
 pyyaml = []
 regex = []

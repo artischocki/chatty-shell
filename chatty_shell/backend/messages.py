@@ -1,4 +1,9 @@
 from langchain_core.messages import ToolMessage, AIMessage
+from pydantic import BaseModel
+
+
+class ChatInput(BaseModel):
+    message: str
 
 
 def sort_tools_calls(messages: list[ToolMessage | AIMessage]) -> dict[str, str]:
