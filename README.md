@@ -1,38 +1,93 @@
-# 🎙️ LangGraph Terminal Chat Agent
+# Chatty‑Shell
 
-A sleek, interactive terminal-based chat agent built with LangGraph’s prebuilt React agent and OpenAI’s GPT-4.  
-Type `ai` to hop into a chat session that:
-
-- 💬 Wraps your messages in right-aligned speech bubbles  
-- 🤖 Presents AI replies in left-aligned bubbles  
-- 🛠️ Splits tool calls into a neat command/response bubble  
-- 📐 Auto-fits each bubble to your terminal width (up to ¾ of the screen)  
-- ✨ Clears your input line for a cleaner chat UI  
+**Chatty‑Shell** is a terminal-based AI assistant that lets you chat naturally while executing real shell commands in your current session. It’s designed to be transparent, predictable, and safe—yet powerful.
 
 ---
 
 ## 🚀 Features
 
-- **Prebuilt React Agent**  
-  Leverage LangGraph’s `create_react_agent` with minimal wiring—no custom graph definitions needed.
+* **Natural Language Chat**
+  Talk to the AI just like a friend—ask questions, get explanations, or request commands.
 
-- **Shell Tool Integration**  
-  Prefix any message with a shell command (or call via the React agent) and see the output in a split bubble.
+* **Shell Tool**
 
-- **Adaptive Bubbles**  
-  Messages auto-wrap and right-/left-align, shrinking to fit their content.
+  * The agent executes real shell commands directly from the chat in your current terminal session.
+  * Non‑destructive commands (e.g., `ls`, `cat`, `pwd`) can be run freely by the agent.
 
-- **Disappearing Prompt**  
-  Your typed line vanishes on Enter, leaving only the formatted chat bubbles.
+* **History Lookup Tool (Optional)**
+
+  * Requires your consent, because history can contain sensitive information. You don't have to use this feature.
+  * Inspect your past shell commands to recall context.
 
 ---
 
-## 💾 Installation
+## 🔧 Shell Tool Rules
 
-1. **Clone the repo**  
-   ```bash
-   git clone https://github.com/your-username/langgraph-terminal-agent.git
-   cd langgraph-terminal-agent
-   python src/main.py
-   ```
-TODO pypi package releasen
+1. **Non‑destructive Commands**
+   The Agent may run any command that doesn’t modify or delete existing files _without_ asking.
+
+2. **File‑Altering Operations**
+
+   * If a command will change or remove files, the agent **must ask for your permission** first.
+   * If **you explicitly ask** for file changes or risky operations, it may proceed immediately.
+
+3. **File Creation**
+
+   * No prior permission is needed to create new files.
+   * The agent will always **inform you** when it has created any file (and where).
+
+---
+
+## 🕵 History Lookup Tool Rules
+
+* You grant permission once via the chat application.
+* After that, the agent can inspect your shell history whenever it might be useful.
+* No further prompts are needed for history lookups.
+
+---
+
+## ⚠️ Warnings & Best Practices
+
+* **Real Effects**: Commands you issue in Chatty‑Shell run in your live terminal session. Mistakes can have immediate consequences.
+* **Review Before Execution**: Always read and confirm tool‑generated commands before they run.
+* **Sensitive Data**: Avoid sharing passwords or secrets in chat. Chatty‑Shell does not redact them automatically.
+* **Backups**: Keep backups of important files—especially before performing batch or recursive operations.
+
+---
+
+## 📦 Installation
+
+```bash
+pip install chatty-shell
+```
+
+## 💬 Usage
+
+After installation, start the assistant with:
+
+```bash
+chat
+```
+
+Then type as you would in any chat:
+
+```text
+🧑> Show me my current directory
+🤖> Sure! Running `pwd`: /home/user/project
+```
+
+* Prefix any message with a shell command directly, or just ask the AI to run one.
+* The agent will display a shell-style response bubble with the command output.
+
+---
+
+## 🔐 Security & Privacy
+
+* **Credentials**: Chatty‑Shell does not handle SSH keys or API tokens. Any command touching credentials is your responsibility.
+* **Local Scope**: All commands affect your local machine only (no cloud sync).
+
+---
+
+## 📄 License
+
+MIT License. See [LICENSE](LICENSE) for details.
