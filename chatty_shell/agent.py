@@ -15,9 +15,9 @@ API_KEY = "OPENAI_API_KEY"
 def _get_llm(model: str | None = None, api_token: str | None = None) -> ChatOpenAI:
     if api_token is None:
         raise MissingTokenException
-    # default model is gpt-3.5-turbo
+    # default model is gpt-4.1-mini
     if model is None:
-        model = "gpt-3.5-turbo"
+        model = "gpt-4.1-mini"
 
     llm = ChatOpenAI(model=model, api_key=api_token)
     return llm
