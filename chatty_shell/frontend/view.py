@@ -125,7 +125,6 @@ class View:
         win.box()
 
         flat = self._flatten_chat_map()
-        # save for click-to-copy
         self.last_chat_map = flat
 
         total = len(flat)
@@ -136,9 +135,25 @@ class View:
         for row, (text, who, _, is_code) in enumerate(
             flat[self.scroll_offset : self.scroll_offset + visible], start=1
         ):
+            # compute x‐position as before
             x = 1 if who == "ai" else self.chat_w - len(text) - 1
-            attr = self.code_attr if is_code else self.default_attr
-            win.addstr(row, x, text, attr)
+
+            if not is_code:
+                # normal line (including borders): one call
+                win.addstr(row, x, text, self.default_attr)
+            else:
+                # code line: split off the bubble borders ("│ " and " │")
+                # assume every code‐line is framed as "│ {content} │"
+                left = text[:2]  # "│ "
+                inner = text[2:-2]  # the actual code
+                right = text[-2:]  # " │"
+
+                # draw left border
+                win.addstr(row, x, left, self.default_attr)
+                # draw code text
+                win.addstr(row, x + 2, inner, self.code_attr)
+                # draw right border
+                win.addstr(row, x + 2 + len(inner), right, self.default_attr)
 
         win.refresh()
 

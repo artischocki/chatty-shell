@@ -1,0 +1,3 @@
+- coloring of code (pygments, but package conflicts)
+- prompting
+- 
