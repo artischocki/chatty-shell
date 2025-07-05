@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "terminal_agent"
-version = "0.1.0"
+name = "chatty-shell"
+version = "0.1.1"
 description = ""
-authors = ["Artur Dernst"]
+authors = ["Artur Dernst <artur@dernst.me>"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -11,6 +11,9 @@ langchain = "^0.3.26"
 openai = "^1.93.0"
 langchain-community = "^0.3.27"
 langchain-openai = "^0.3.27"
+
+[[tool.poetry.packages]]
+include = "chatty_shell"
 
 [tool.poetry.dev-dependencies]
 
