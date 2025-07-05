@@ -71,10 +71,7 @@ chat
 
 Then type as you would in any chat:
 
-```text
-🧑> Show me my current directory
-🤖> Sure! Running `pwd`: /home/user/project
-```
+![Demo](./assets/demo.gif)
 
 * Prefix any message with a shell command directly, or just ask the AI to run one.
 * The agent will display a shell-style response bubble with the command output.
