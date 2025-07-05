@@ -249,33 +249,51 @@ class View:
 
     def _handle_mouse(self):
         try:
-            _, mx, my, _, b = curses.getmouse()
+            _, mx, my, _, bstate = curses.getmouse()
         except curses.error:
             return
-        # only if clicked in chat pane
+
+        # only handle clicks inside the chat pane
         if not (0 <= my < self.chat_h and 0 <= mx < self.chat_w):
             return
 
-        # scroll wheel
+        # scroll wheel (unchanged) …
         flat = self._flatten_chat_map()
         total = len(flat)
         visible = self.chat_h - 2
         max_off = max(0, total - visible)
-
-        if b & curses.BUTTON4_PRESSED:
+        if bstate & curses.BUTTON4_PRESSED:
             self.scroll_offset = max(0, self.scroll_offset - self.scroll_speed)
             return
-        if b & curses.BUTTON5_PRESSED:
+        if bstate & curses.BUTTON5_PRESSED:
             self.scroll_offset = min(max_off, self.scroll_offset + self.scroll_speed)
             return
 
-        # middle click: copy full message
-        if b & curses.BUTTON2_PRESSED:
+        # middle-click: copy
+        if bstate & curses.BUTTON2_PRESSED:
             line_idx = (my - 1) + self.scroll_offset
-            if 0 <= line_idx < len(self.last_chat_map):
-                _, _, msg_idx, _ = self.last_chat_map[line_idx]
-                full_msg = self.messages[msg_idx][0]
-                copy_to_clipboard(full_msg)
-                self.status_msg = "Copied to clipboard!"
-                self.status_time = time.time()
+            if not (0 <= line_idx < len(self.last_chat_map)):
+                return
+
+            _, _, msg_idx, is_code = self.last_chat_map[line_idx]
+
+            if is_code:
+                # collect only code lines for this message, stripping bubble borders
+                code_lines: list[str] = []
+                for text, who, idx, code_flag in self.last_chat_map:
+                    if idx == msg_idx and code_flag:
+                        if text.startswith("│ ") and text.endswith(" │"):
+                            content = text[2:-2]
+                        else:
+                            content = text
+                        code_lines.append(content)
+                text_to_copy = "\n".join(code_lines)
+
+            else:
+                # fallback: copy the original un-framed message
+                text_to_copy = self.messages[msg_idx][0]
+
+            copy_to_clipboard(text_to_copy)
+            self.status_msg = "Copied to clipboard!"
+            self.status_time = time.time()
             return
