@@ -1,55 +1,65 @@
 import curses
 import textwrap
 import time
-import subprocess
+import pyperclip
 from multiprocessing import Queue
-from typing import Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from chatty_shell.frontend.ascii import wrap_message
 
 
-def copy_to_clipboard(text: str):
-    try:
-        import pyperclip
-
-        pyperclip.copy(text)
-    except ImportError:
-        p = subprocess.Popen(
-            ["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE
-        )
-        p.communicate(text.encode())
+def copy_to_clipboard(text: str) -> None:
+    """
+    Copy the given text to the system clipboard.
+    """
+    pyperclip.copy(text)
 
 
 class View:
+    """
+    Text-based UI using curses. Displays a scrollable chat pane on the left,
+    a scrollable tool-output sidebar on the right, and an input prompt at the bottom.
+    Supports code highlighting, mouse scrolling, and middle-click copying.
+    """
+
     def __init__(self, *, human_queue: Queue, ai_queue: Queue):
-        # queues
-        self.human_queue = human_queue
-        self.ai_queue = ai_queue
+        """
+        Initialize the view with queues for outgoing human messages and incoming AI/tool responses.
+        """
+        # IPC queues
+        self.human_queue: Queue = human_queue
+        self.ai_queue: Queue = ai_queue
 
-        # chat + input state
-        self.messages: list[Tuple[str, str]] = []
+        # Chat state
+        self.messages: List[Tuple[str, str]] = []  # (text, author)
         self.input_buffer: str = ""
-        self.scroll_offset: int = 0
-        self.scroll_speed: int = 3
+        self.chat_offset: int = 0
+        self.chat_scroll_speed: int = 3
 
-        # status & debug
-        self.status_msg: Optional[str] = None
-        self.status_time: float = 0.0
-        self.debug_msgs: list[str] = []
+        # Sidebar state
+        self.tool_calls: List[Dict[str, str]] = []  # list of {cmd: output}
+        self.sidebar_offset: int = 0
+
+        # Debug overlay
+        self.debug_messages: List[str] = []
         self.show_debug: bool = False
 
-        # color attrs (set in curses init)
-        self.default_attr = 0
-        self.code_attr = 0
+        # Color attributes (set in curses init)
+        self.default_attr: int = 0
+        self.code_attr: int = 0
+        self.cmd_attr: int = 0
 
-    def log_debug(self, msg: str):
-        self.debug_msgs.append(msg)
-
-    def run(self):
+    def run(self) -> None:
+        """
+        Launch the curses application.
+        """
         curses.wrapper(self._main)
 
-    def _main(self, stdscr):
+    def _main(self, stdscr) -> None:
+        """
+        Curses entry point: initialize, then enter the main loop.
+        """
         self._init_curses(stdscr)
-        self._create_windows(stdscr)
+        self._init_windows(stdscr)
         self.input_win.nodelay(True)
         self.input_win.keypad(True)
 
@@ -66,9 +76,10 @@ class View:
             self._handle_input()
             time.sleep(0.01)
 
-    # ── Setup ────────────────────────────────────────────────────────────────────
-
-    def _init_curses(self, stdscr):
+    def _init_curses(self, stdscr) -> None:
+        """
+        Configure curses modes and initialize color pairs.
+        """
         curses.curs_set(1)
         curses.noecho()
         curses.cbreak()
@@ -76,10 +87,13 @@ class View:
 
         curses.start_color()
         curses.use_default_colors()
-        curses.init_pair(1, -1, -1)  # default fg/bg
-        curses.init_pair(2, curses.COLOR_WHITE, curses.COLOR_BLACK)
+        curses.init_pair(1, -1, -1)  # default
+        curses.init_pair(2, curses.COLOR_WHITE, curses.COLOR_BLACK)  # code/output
+        curses.init_pair(3, curses.COLOR_BLUE, -1)  # commands
+
         self.default_attr = curses.color_pair(1)
         self.code_attr = curses.color_pair(2)
+        self.cmd_attr = curses.color_pair(3)
 
         stdscr.bkgd(" ", self.default_attr)
         curses.mousemask(
@@ -87,7 +101,10 @@ class View:
         )
         curses.mouseinterval(0)
 
-    def _create_windows(self, stdscr):
+    def _init_windows(self, stdscr) -> None:
+        """
+        Create and initialize the chat, sidebar, input, and debug windows.
+        """
         h, w = stdscr.getmaxyx()
         self.height, self.width = h, w
         self.sidebar_w = max(20, w // 4)
@@ -95,52 +112,51 @@ class View:
         self.input_h = 3
         self.chat_h = h - self.input_h
 
-        def init_win(win):
+        def setup(win):
             win.bkgd(" ", self.default_attr)
             win.clear()
             win.box()
             win.refresh()
 
         self.chat_win = curses.newwin(self.chat_h, self.chat_w, 0, 0)
-        init_win(self.chat_win)
         self.sidebar_win = curses.newwin(self.chat_h, self.sidebar_w, 0, self.chat_w)
-        init_win(self.sidebar_win)
         self.input_win = curses.newwin(self.input_h, w, self.chat_h, 0)
-        init_win(self.input_win)
         self.debug_win = curses.newwin(h, w, 0, 0)
-        init_win(self.debug_win)
 
-    # ── Drawing ──────────────────────────────────────────────────────────────────
+        for win in (self.chat_win, self.sidebar_win, self.input_win, self.debug_win):
+            setup(win)
 
-    def _draw_all(self):
+    def _draw_all(self) -> None:
+        """
+        Draw all panes and update the screen.
+        """
         self._draw_chat()
         self._draw_sidebar()
         self._draw_input()
         self._refresh()
 
-    def _draw_chat(self):
+    def _draw_chat(self) -> None:
+        """
+        Render chat messages with bubble framing and syntax-highlighted code.
+        """
         win = self.chat_win
         win.erase()
         win.box()
 
-        flat = self._flatten_chat_map()
-        self.last_chat_map = flat  # for copy-on-click
+        flat = self._flatten_chat()
+        self.last_chat_map = flat
 
-        total = len(flat)
         visible = self.chat_h - 2
+        total = len(flat)
         max_off = max(0, total - visible)
-        # clamp
-        self.scroll_offset = min(max_off, max(0, self.scroll_offset))
+        self.chat_offset = min(max_off, max(0, self.chat_offset))
 
-        # draw only visible slice
-        start = self.scroll_offset
-        end = start + visible
-        for row, (text, who, _, is_code) in enumerate(flat[start:end], start=1):
+        segment = flat[self.chat_offset : self.chat_offset + visible]
+        for row, (text, who, is_code) in enumerate(segment, start=1):
             x = 1 if who == "ai" else self.chat_w - len(text) - 1
             if not is_code:
                 win.addstr(row, x, text, self.default_attr)
             else:
-                # split borders from code
                 left, inner, right = text[:2], text[2:-2], text[-2:]
                 win.addstr(row, x, left, self.default_attr)
                 win.addstr(row, x + 2, inner, self.code_attr)
@@ -148,17 +164,30 @@ class View:
 
         win.refresh()
 
-    def _draw_sidebar(self):
+    def _draw_sidebar(self) -> None:
+        """
+        Render tool call commands and their outputs in a scrollable sidebar.
+        """
         win = self.sidebar_win
         win.erase()
         win.box()
-        if self.status_msg and (time.time() - self.status_time) < 3:
-            win.addstr(1, 2, self.status_msg[: self.sidebar_w - 4], self.default_attr)
-        else:
-            self.status_msg = None
+
+        flat = self._flatten_sidebar()
+        visible = self.chat_h - 2
+        total = len(flat)
+        max_off = max(0, total - visible)
+        self.sidebar_offset = min(max_off, max(0, self.sidebar_offset))
+
+        segment = flat[self.sidebar_offset : self.sidebar_offset + visible]
+        for row, (text, attr) in enumerate(segment, start=1):
+            win.addstr(row, 1, text, attr)
+
         win.refresh()
 
-    def _draw_input(self):
+    def _draw_input(self) -> None:
+        """
+        Render the user input prompt at the bottom.
+        """
         win = self.input_win
         win.erase()
         win.box()
@@ -166,12 +195,15 @@ class View:
         win.addstr(1, 1, prompt, self.default_attr)
         win.refresh()
 
-    def _draw_debug(self):
+    def _draw_debug(self) -> None:
+        """
+        Overlay a debug window showing internal log messages.
+        """
         win = self.debug_win
         win.erase()
         win.box()
         y = 1
-        for msg in self.debug_msgs[-(self.height - 2) :]:
+        for msg in self.debug_messages[-(self.height - 2) :]:
             for seg in textwrap.wrap(msg, self.width - 2):
                 if y < self.height - 1:
                     win.addstr(y, 1, seg, self.default_attr)
@@ -179,53 +211,84 @@ class View:
         win.addstr(self.height - 1, 2, "[F2] Hide debug", self.default_attr)
         win.refresh()
 
-    def _refresh(self):
+    def _refresh(self) -> None:
+        """
+        Batch-refresh all visible windows.
+        """
         self.chat_win.noutrefresh()
         self.sidebar_win.noutrefresh()
         self.input_win.noutrefresh()
         curses.doupdate()
 
-    # ── Flatten & Autoscroll Helper ──────────────────────────────────────────────
-
-    def _flatten_chat_map(self) -> list[tuple[str, Optional[str], int, bool]]:
+    def _flatten_chat(self) -> List[Tuple[str, str, bool]]:
         """
-        Returns list of (line_text, who, msg_index, is_code)
-        for every wrapped segment + one blank per message.
+        Flatten chat messages into a list of (line, author, is_code) for rendering.
         """
-        out: list[tuple[str, Optional[str], int, bool]] = []
-        inner_w = self.chat_w - 2
+        lines: List[Tuple[str, str, bool]] = []
+        max_inner = self.chat_w - 2
 
-        for idx, (msg, who) in enumerate(self.messages):
-            segments = wrap_message(msg, inner_w, who)
-            for line, is_code in segments:
-                out.append((line, who, idx, is_code))
-            out.append(("", None, idx, False))
+        for msg, who in self.messages:
+            for text, is_code in wrap_message(msg, max_inner, who):
+                lines.append((text, who, is_code))
+        return lines
+
+    def _flatten_sidebar(self) -> List[Tuple[str, int]]:
+        """
+        Flatten tool calls into a list of (line, attribute) for rendering.
+        """
+        out: List[Tuple[str, int]] = []
+        max_inner = self.sidebar_w - 2
+
+        for call in self.tool_calls:
+            for cmd, output in call.items():
+                out.append((cmd[:max_inner], self.cmd_attr))
+                for ln in output.splitlines():
+                    text = ln[:max_inner]
+                    pad = " " * (max_inner - len(text))
+                    out.append((text + pad, self.code_attr))
+                out.append((" " * max_inner, self.default_attr))
 
         return out
 
-    def _max_offset(self) -> int:
-        total = len(self._flatten_chat_map())
+    def _drain_ai_queue(self) -> None:
+        """
+        Process incoming AI messages and tool calls, and autoscroll if at bottom.
+        """
+        at_bottom = self.chat_offset == self._max_chat_offset()
+
+        while not self.ai_queue.empty():
+            calls, ai_msg = self.ai_queue.get()
+            if isinstance(calls, dict):
+                self.tool_calls.append(calls)
+            else:
+                self.tool_calls.extend(calls)
+
+            self.messages.append((ai_msg, "ai"))
+
+        if at_bottom:
+            self.chat_offset = self._max_chat_offset()
+
+    def _max_chat_offset(self) -> int:
+        """
+        Compute the maximum scroll offset for the chat pane.
+        """
+        total = len(self._flatten_chat())
         visible = self.chat_h - 2
         return max(0, total - visible)
 
-    # ── Queues with Autoscroll ───────────────────────────────────────────────────
+    def _max_sidebar_offset(self) -> int:
+        """
+        Compute the maximum scroll offset for the sidebar.
+        """
+        total = len(self._flatten_sidebar())
+        visible = self.chat_h - 2
+        return max(0, total - visible)
 
-    def _drain_ai_queue(self):
-        # only autoscroll if already at bottom
-        at_bottom = self.scroll_offset == self._max_offset()
-
-        while not self.ai_queue.empty():
-            _, ai_msg = self.ai_queue.get()
-            self.messages.append((ai_msg, "ai"))
-            self.log_debug(f"AI → {ai_msg!r}")
-
-        if at_bottom:
-            self.scroll_offset = self._max_offset()
-
-    # ── Input & Mouse ────────────────────────────────────────────────────────────
-
-    def _handle_input(self):
-        keys = []
+    def _handle_input(self) -> None:
+        """
+        Read and process all pending key and mouse events.
+        """
+        keys: List[int] = []
         while True:
             k = self.input_win.getch()
             if k == -1:
@@ -233,79 +296,95 @@ class View:
             keys.append(k)
         if not keys:
             return
-        burst = len(keys) > 1
 
+        burst = len(keys) > 1
         for key in keys:
             if key == curses.KEY_MOUSE:
                 self._handle_mouse()
-                continue
-            if key == curses.KEY_F2:
+            elif key == curses.KEY_F2:
                 self.show_debug = True
-                continue
-            if key in (curses.KEY_ENTER, 10, 13):
+            elif key in (curses.KEY_ENTER, 10, 13):
                 if burst:
                     self.input_buffer += " "
                 else:
                     self._send_human()
-                continue
-            if key in (curses.KEY_BACKSPACE, 127, 8):
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
                 self.input_buffer = self.input_buffer[:-1]
-                continue
-            if key == 27:  # ESC
+            elif key == 27:  # ESC
                 exit()
-            if 32 <= key < 256:
+            elif 32 <= key < 256:
                 self.input_buffer += chr(key)
 
-    def _send_human(self):
-        at_bottom = self.scroll_offset == self._max_offset()
+    def _send_human(self) -> None:
+        """
+        Send the current input buffer as a human message if non-empty.
+        """
+        # Prevent sending empty or whitespace-only messages
+        if not self.input_buffer.strip():
+            return
+
+        at_bottom = self.chat_offset == self._max_chat_offset()
         self.human_queue.put(self.input_buffer)
         self.messages.append((self.input_buffer, "human"))
-        self.log_debug(f"Human → {self.input_buffer!r}")
         self.input_buffer = ""
         if at_bottom:
-            self.scroll_offset = self._max_offset()
+            self.chat_offset = self._max_chat_offset()
 
-    def _handle_mouse(self):
+    def _handle_mouse(self) -> None:
+        """
+        Handle mouse scroll for chat/sidebar and middle-click copying.
+        """
         try:
-            _, mx, my, _, bstate = curses.getmouse()
+            _, mx, my, _, b = curses.getmouse()
         except curses.error:
             return
-        if not (0 <= my < self.chat_h and 0 <= mx < self.chat_w):
-            return
 
-        # scroll wheel
-        flat = self._flatten_chat_map()
-        total = len(flat)
-        visible = self.chat_h - 2
-        max_off = max(0, total - visible)
-        if bstate & curses.BUTTON4_PRESSED:
-            self.scroll_offset = max(0, self.scroll_offset - self.scroll_speed)
-            return
-        if bstate & curses.BUTTON5_PRESSED:
-            self.scroll_offset = min(max_off, self.scroll_offset + self.scroll_speed)
-            return
-
-        # middle-click: copy code or full message
-        if bstate & curses.BUTTON2_PRESSED:
-            line_idx = (my - 1) + self.scroll_offset
-            if not (0 <= line_idx < len(self.last_chat_map)):
+        # Chat pane area
+        if 0 <= my < self.chat_h and 0 <= mx < self.chat_w:
+            if b & curses.BUTTON4_PRESSED:
+                self.chat_offset = max(0, self.chat_offset - self.chat_scroll_speed)
                 return
-            _, _, msg_idx, is_code = self.last_chat_map[line_idx]
+            if b & curses.BUTTON5_PRESSED:
+                self.chat_offset = min(
+                    self._max_chat_offset(), self.chat_offset + self.chat_scroll_speed
+                )
+                return
+            if b & curses.BUTTON2_PRESSED:
+                line_idx = my - 1 + self.chat_offset
+                if 0 <= line_idx < len(self.last_chat_map):
+                    _, _, is_code = self.last_chat_map[line_idx]
+                    msg_idx = self.last_chat_map[line_idx][2]
+                    if is_code:
+                        code_lines = [
+                            text[2:-2]
+                            for text, _, idx, code_flag in self.last_chat_map
+                            if idx == msg_idx and code_flag
+                        ]
+                        copy_to_clipboard("\n".join(code_lines))
+                    else:
+                        copy_to_clipboard(self.messages[msg_idx][0])
+                return
 
-            if is_code:
-                # copy only code lines (strip borders)
-                code_lines = []
-                for text, who, idx, code_flag in self.last_chat_map:
-                    if idx == msg_idx and code_flag:
-                        content = text
-                        if text.startswith("│ ") and text.endswith(" │"):
-                            content = text[2:-2]
-                        code_lines.append(content)
-                text_to_copy = "\n".join(code_lines)
-            else:
-                text_to_copy = self.messages[msg_idx][0]
-
-            copy_to_clipboard(text_to_copy)
-            self.status_msg = "Copied to clipboard!"
-            self.status_time = time.time()
+        # Sidebar area
+        if 0 <= my < self.chat_h and self.chat_w <= mx < self.chat_w + self.sidebar_w:
+            if b & curses.BUTTON4_PRESSED:
+                self.sidebar_offset = max(
+                    0, self.sidebar_offset - self.chat_scroll_speed
+                )
+            elif b & curses.BUTTON5_PRESSED:
+                self.sidebar_offset = min(
+                    self._max_sidebar_offset(),
+                    self.sidebar_offset + self.chat_scroll_speed,
+                )
             return
+
+    def _handle_debug_toggle(self) -> None:
+        """
+        Close the debug overlay when F2 is pressed.
+        """
+        key = self.input_win.getch()
+        if key == curses.KEY_F2:
+            self.show_debug = False
+            self.input_win.clear()
+            self.input_win.box()
+            self.input_win.refresh()
