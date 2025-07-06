@@ -82,7 +82,8 @@ def wrap_message(message: str, panel_w: int, type: str) -> List[Tuple[str, bool]
 
     # top border
     if type == "human":
-        bubble.append(("╭" + "─" * (actual_inner + 1) + "🤓 ", False))
+        bubble.append(("╭" + "─" * (actual_inner + 2) + "╮", False))
+        # bubble.append(("╭" + "─" * (actual_inner + 1) + "🤓", False))
     elif type == "ai":
         bubble.append(("🤖" + "─" * (actual_inner + 1) + "╮", False))
     else:

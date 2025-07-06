@@ -78,9 +78,10 @@ class View:
 
     def _init_curses(self, stdscr) -> None:
         """
-        Configure curses modes and initialize color pairs.
+        Configure curses: disable the real cursor and set up color pairs.
         """
-        curses.curs_set(1)
+        # hide the real hardware cursor
+        curses.curs_set(0)
         curses.noecho()
         curses.cbreak()
         stdscr.keypad(True)
@@ -134,18 +135,18 @@ class View:
 
     def _recalculate_layout(self) -> None:
         """
-        Recompute chat_h and input_h based on current input_buffer.
-        Resize chat and input windows; leave sidebar at full height.
+        Resize the chat and input windows based on the current input buffer.
+        The input window height grows to fit wrapped lines, and the chat window
+        height shrinks accordingly. The sidebar remains full-height.
         """
-        inner_w = self.chat_w - 3  # account for borders
-        lines: list[str] = []
+        inner_w = self.chat_w - 4  # account for box borders and prompt prefix
+        lines: List[str] = []
         for para in self.input_buffer.split("\n"):
             wrapped = textwrap.wrap(para, width=inner_w) or [""]
             lines.extend(wrapped)
 
-        # new height = top border + lines + bottom border
-        new_input_h = len(lines) + 2
-        max_h = self.height - 3
+        new_input_h = len(lines) + 2  # top & bottom borders
+        max_h = self.height - 3  # leave room for at least 1 chat line + borders
         new_input_h = min(new_input_h, max_h)
 
         if new_input_h == self.input_h:
@@ -154,12 +155,9 @@ class View:
         self.input_h = new_input_h
         self.chat_h = self.height - self.input_h
 
-        # resize/move chat
         self.chat_win.resize(self.chat_h, self.chat_w)
-        # resize/move input (same width as chat)
         self.input_win.resize(self.input_h, self.chat_w)
         self.input_win.mvwin(self.chat_h, 0)
-        # sidebar stays full height; debug stays full screen
 
     def _draw_all(self) -> None:
         """
@@ -225,30 +223,51 @@ class View:
 
     def _draw_input(self) -> None:
         """
-        Render the input window, growing to fit the input, with a '> ' prompt
-        at the start of the first line.
+        Draw the input window with a '> ' prompt on the first line,
+        wrap text to the chat pane width, and render a synthetic cursor
+        that advances even when typing spaces.
         """
         win = self.input_win
         win.erase()
         win.box()
 
-        inner_w = self.width - 3
+        inner_w = self.chat_w - 4  # account for borders + prompt prefix
 
-        # wrap each paragraph to fit, preserving explicit newlines
+        # Wrap each paragraph, preserving explicit newlines
+        paras = self.input_buffer.split("\n")
         lines: List[str] = []
-        for para in self.input_buffer.split("\n"):
+        for para in paras:
             wrapped = textwrap.wrap(para, width=inner_w) or [""]
             lines.extend(wrapped)
 
-        # only display as many lines as will fit
+        # Only show as many lines as will fit
         visible = self.input_h - 2
         display = lines[-visible:]
 
+        # Draw each line with prompt or padding
         for idx, line in enumerate(display, start=1):
-            # first line gets the prompt, subsequent lines get two spaces
             prefix = "> " if idx == 1 else "  "
-            text = prefix + line
-            win.addstr(idx, 1, text, self.default_attr)
+            win.addstr(idx, 1, prefix + line, self.default_attr)
+
+        # Synthetic cursor position based on raw buffer (so spaces count)
+        raw_last = paras[-1]
+        col_offset = len(raw_last) % inner_w
+        if raw_last and col_offset == 0:
+            col_offset = inner_w
+
+        cursor_row = len(display)
+        prefix_len = 2
+        cursor_col = 1 + prefix_len + col_offset
+        max_col = self.chat_w - 2
+        if cursor_col > max_col:
+            cursor_col = max_col
+
+        # Draw the cursor as a reversed character or blank
+        try:
+            ch = win.inch(cursor_row, cursor_col) & 0xFF
+            win.addch(cursor_row, cursor_col, ch, curses.A_REVERSE)
+        except curses.error:
+            win.addstr(cursor_row, cursor_col, " ", curses.A_REVERSE)
 
         win.refresh()
 
@@ -309,21 +328,30 @@ class View:
 
     def _drain_ai_queue(self) -> None:
         """
-        Process incoming AI messages and tool calls, and autoscroll if at bottom.
+        Process incoming AI messages and tool calls,
+        and autoscroll chat and sidebar if each was already at its bottom.
         """
-        at_bottom = self.chat_offset == self._max_chat_offset()
+        chat_at_bottom = self.chat_offset == self._max_chat_offset()
+        sidebar_at_bottom = self.sidebar_offset == self._max_sidebar_offset()
 
+        # drain all queued AI/tool events
         while not self.ai_queue.empty():
             calls, ai_msg = self.ai_queue.get()
+
+            # record the raw tool calls
             if isinstance(calls, dict):
                 self.tool_calls.append(calls)
             else:
                 self.tool_calls.extend(calls)
 
+            # append the AI chat message
             self.messages.append((ai_msg, "ai"))
 
-        if at_bottom:
+        # if we were viewing the bottom, stay pinned to new bottom
+        if chat_at_bottom:
             self.chat_offset = self._max_chat_offset()
+        if sidebar_at_bottom:
+            self.sidebar_offset = self._max_sidebar_offset()
 
     def _max_chat_offset(self) -> int:
         """
