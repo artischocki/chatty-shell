@@ -2,5 +2,5 @@ class MissingPromptException(Exception):
     pass
 
 
-class MissingTokenException(Exception):
+class MissingApiKeyException(Exception):
     pass

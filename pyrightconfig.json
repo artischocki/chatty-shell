@@ -1,6 +1,6 @@
 {
   // Basis-Verzeichnis für virtuelle Umgebungen (Poetry speichert sie hier)
-  "venvPath": "/home/anf3fe/.cache/pypoetry/virtualenvs",
+  "venvPath": "/home/artur/code/chatty-shell/",
   // Name des konkreten Envs (Ordnername ohne Pfad)
-  "venv": "terminal-agent-4yHmUWCC-py3.10",
+  "venv": ".venv",
 }

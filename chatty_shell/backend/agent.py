@@ -9,7 +9,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from chatty_shell.backend.exceptions import (
     MissingPromptException,
-    MissingTokenException,
+    MissingApiKeyException,
 )
 
 API_KEY = "OPENAI_API_KEY"
@@ -17,7 +17,7 @@ API_KEY = "OPENAI_API_KEY"
 
 def _get_llm(model: str | None = None, api_token: str | None = None) -> ChatOpenAI:
     if api_token is None:
-        raise MissingTokenException
+        raise MissingApiKeyException
     # default model is gpt-4.1-mini
     if model is None:
         model = "gpt-4.1-mini"

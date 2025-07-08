@@ -3,7 +3,7 @@ import textwrap
 import time
 import pyperclip
 from multiprocessing import Queue
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Dict
 from chatty_shell.frontend.ascii import wrap_message
 
 
@@ -21,13 +21,22 @@ class View:
     Supports code highlighting, mouse scrolling, and middle-click copying.
     """
 
-    def __init__(self, *, human_queue: Queue, ai_queue: Queue):
+    def __init__(
+        self,
+        *,
+        human_queue: Queue,
+        ai_queue: Queue,
+        popup_queue: Queue,
+        popup_response_queue: Queue
+    ):
         # default input height (will grow later in _recalculate_layout)
         self.input_h = 3
 
         # IPC queues
         self.human_queue = human_queue
         self.ai_queue = ai_queue
+        self.popup_queue = popup_queue
+        self.popup_response_queue = popup_response_queue
 
         # Chat state...
         self.messages: List[Tuple[str, str]] = []
@@ -48,6 +57,17 @@ class View:
         self.code_attr = 0
         self.cmd_attr = 0
 
+        # Popup state...
+        self.popup_active: bool = False
+        self.popup_message: str = ""
+        self.popup_buffer: str = ""
+        self.popup_win = None
+        self.popup_input_win = None
+        self.popup_h = 0
+        self.popup_w = 0
+        self.popup_y = 0
+        self.popup_x = 0
+
     def run(self) -> None:
         """
         Launch the curses application.
@@ -64,6 +84,20 @@ class View:
         self.input_win.keypad(True)
 
         while True:
+            # 1) check for new popup requests
+            if not self.popup_queue.empty():
+                self.popup_message = self.popup_queue.get()
+                self.popup_buffer = ""
+                self.show_popup(self.popup_message)
+
+            # 2) if popup is active, drive popup UI
+            if self.popup_active:
+                self._draw_popup()
+                self._handle_popup_input()
+                time.sleep(0.01)
+                continue
+
+            # 3) otherwise, normal chat flow
             self._drain_ai_queue()
 
             if self.show_debug:
@@ -286,6 +320,120 @@ class View:
                     y += 1
         win.addstr(self.height - 1, 2, "[F2] Hide debug", self.default_attr)
         win.refresh()
+
+    def show_popup(self, message: str) -> None:
+        """
+        Activate a popup showing `message` and an input box underneath.
+        """
+        self.popup_active = True
+        self.popup_message = message
+        self.popup_buffer = ""
+        self._create_popup_windows()
+
+    def hide_popup(self) -> None:
+        """
+        Deactivate and destroy the popup windows.
+        """
+        self.popup_active = False
+        if self.popup_win:
+            del self.popup_win
+            self.popup_win = None
+        if self.popup_input_win:
+            del self.popup_input_win
+            self.popup_input_win = None
+
+    def _create_popup_windows(self) -> None:
+        """
+        Compute size and position, then create the popup windows.
+        """
+        # popup covers 70% of width and 50% of height, centered
+        ph = max(6, self.height // 2)
+        pw = max(20, (self.width * 7) // 10)
+        py = (self.height - ph) // 2
+        px = (self.width - pw) // 2
+
+        # content window (with border)
+        self.popup_h = ph - 3  # leave 3 rows for input box
+        self.popup_w = pw
+        self.popup_y = py
+        self.popup_x = px
+
+        self.popup_win = curses.newwin(self.popup_h, pw, py, px)
+        self.popup_input_win = curses.newwin(3, pw, py + self.popup_h, px)
+
+        for win in (self.popup_win, self.popup_input_win):
+            win.bkgd(" ", self.default_attr)
+            win.clear()
+            win.box()
+            win.refresh()
+
+    def _draw_popup(self) -> None:
+        """
+        Draw the popup message and input prompt, and render
+        a synthetic cursor in the popup input field.
+        """
+        # 1) Render the message portion
+        mw = self.popup_win
+        if mw is None:
+            raise Exception(
+                "popup_win has not been initialized. This should not happen."
+            )
+        mw.erase()
+        mw.box()
+        mw.addstr(0, 2, " Popup ", self.default_attr)
+
+        inner_msg_w = self.popup_w - 2
+        lines = textwrap.wrap(self.popup_message, width=inner_msg_w) or [""]
+        visible_msg = self.popup_h - 2
+        for idx, line in enumerate(lines[:visible_msg], start=1):
+            mw.addstr(idx, 1, line.ljust(inner_msg_w), self.default_attr)
+        mw.refresh()
+
+        # 2) Render the input box
+        iw = self.popup_input_win
+        if iw is None:
+            raise Exception(
+                "popup_win has not been initialized. This should not happen."
+            )
+        iw.erase()
+        iw.box()
+
+        # Prepare prompt + buffer, clamped to available space
+        prefix = "> "
+        inner_in_w = self.popup_w - 2  # width inside the borders
+        text = prefix + self.popup_buffer
+        display = text[:inner_in_w].ljust(inner_in_w)
+        iw.addstr(1, 1, display, self.default_attr)
+
+        # 3) Synthetic cursor at end of text
+        # cursor column is 1 (left border) + len(display before clipping)
+        cursor_col = 1 + min(len(text), inner_in_w)
+        try:
+            ch = iw.inch(1, cursor_col) & 0xFF
+            iw.addch(1, cursor_col, ch, curses.A_REVERSE)
+        except curses.error:
+            # if it's past the end, draw a reversed space
+            iw.addstr(1, cursor_col, " ", curses.A_REVERSE)
+
+        iw.refresh()
+
+    def _handle_popup_input(self) -> None:
+        """
+        Handle key events when popup is active.
+        Enter submits (hides popup), backspace edits buffer.
+        """
+        if self.popup_input_win is None:
+            raise Exception("popup_input_win has not been initialized.")
+        key = self.popup_input_win.getch()
+        if key in (curses.KEY_ENTER, 10, 13):
+            # user has submitted
+            self.popup_response_queue.put(self.popup_buffer)
+            self.hide_popup()
+            return
+        if key in (curses.KEY_BACKSPACE, 127, 8):
+            self.popup_buffer = self.popup_buffer[:-1]
+        elif 32 <= key < 256:
+            self.popup_buffer += chr(key)
 
     def _refresh(self) -> None:
         """
