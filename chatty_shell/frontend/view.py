@@ -1,10 +1,11 @@
 import curses
 import textwrap
 import time
+import os
 import pyperclip
 from multiprocessing import Queue
 from typing import List, Tuple, Dict
-from chatty_shell.frontend.ascii import wrap_message
+from chatty_shell.frontend.ascii import wrap_message, ASCII_ART_SPLASH_SCREEN
 
 
 def copy_to_clipboard(text: str) -> None:
@@ -27,7 +28,7 @@ class View:
         human_queue: Queue,
         ai_queue: Queue,
         popup_queue: Queue,
-        popup_response_queue: Queue
+        popup_response_queue: Queue,
     ):
         # default input height (will grow later in _recalculate_layout)
         self.input_h = 3
@@ -47,6 +48,7 @@ class View:
         # Sidebar state...
         self.sidebar_offset: int = 0
         self.tool_calls: List[Dict[str, str]] = []
+        self.sidebar_maximized: bool = False
 
         # Debug...
         self.debug_messages: List[str] = []
@@ -79,6 +81,7 @@ class View:
         Curses entry point: initialize, then enter the main loop.
         """
         self._init_curses(stdscr)
+        self._show_splash(stdscr)
         self._init_windows(stdscr)
         self.input_win.nodelay(True)
         self.input_win.keypad(True)
@@ -136,6 +139,29 @@ class View:
         )
         curses.mouseinterval(0)
 
+    def _show_splash(self, stdscr):
+        """
+        Display a centered ASCII art splash and wait for any key.
+        """
+        ascii_art = ASCII_ART_SPLASH_SCREEN
+        stdscr.erase()
+        h, w = stdscr.getmaxyx()
+        lines = ascii_art.strip("\n").split("\n")
+        y0 = max(0, (h - len(lines)) // 2)
+        for i, line in enumerate(lines):
+            x0 = max(0, (w - len(line)) // 2)
+            stdscr.addstr(y0 + i, x0, line, self.default_attr)
+        stdscr.addstr(
+            y0 + len(lines) + 1,
+            max(0, (w - 24) // 2),
+            "Press any key to continue",
+            self.default_attr,
+        )
+        stdscr.refresh()
+        stdscr.getch()
+        stdscr.erase()
+        stdscr.refresh()
+
     def _init_windows(self, stdscr) -> None:
         """
         Create and initialize the chat, sidebar, input, and debug windows.
@@ -169,29 +195,36 @@ class View:
 
     def _recalculate_layout(self) -> None:
         """
-        Resize the chat and input windows based on the current input buffer.
-        The input window height grows to fit wrapped lines, and the chat window
-        height shrinks accordingly. The sidebar remains full-height.
+        Resize and reposition chat, sidebar, and input windows.
+        If sidebar_maximized, the sidebar takes the full width.
         """
-        inner_w = self.chat_w - 4  # account for box borders and prompt prefix
+        # first compute input_h and chat_h as before
+        inner_w = self.chat_w - 4
         lines: List[str] = []
         for para in self.input_buffer.split("\n"):
             wrapped = textwrap.wrap(para, width=inner_w) or [""]
             lines.extend(wrapped)
-
-        new_input_h = len(lines) + 2  # top & bottom borders
-        max_h = self.height - 3  # leave room for at least 1 chat line + borders
-        new_input_h = min(new_input_h, max_h)
-
-        if new_input_h == self.input_h:
-            return
-
-        self.input_h = new_input_h
+        new_input_h = min(len(lines) + 2, self.height - 3)
+        if new_input_h != self.input_h:
+            self.input_h = new_input_h
         self.chat_h = self.height - self.input_h
 
-        self.chat_win.resize(self.chat_h, self.chat_w)
-        self.input_win.resize(self.input_h, self.chat_w)
-        self.input_win.mvwin(self.chat_h, 0)
+        if self.sidebar_maximized:
+            # sidebar covers entire width
+            self.sidebar_win.resize(self.chat_h, self.width)
+            self.sidebar_win.mvwin(0, 0)
+            # input spans full width
+            self.input_win.resize(self.input_h, self.width)
+            self.input_win.mvwin(self.chat_h, 0)
+        else:
+            # normal left/right layout
+            self.chat_w = self.width - self.sidebar_w
+            self.chat_win.resize(self.chat_h, self.chat_w)
+            self.chat_win.mvwin(0, 0)
+            self.sidebar_win.resize(self.chat_h, self.sidebar_w)
+            self.sidebar_win.mvwin(0, self.chat_w)
+            self.input_win.resize(self.input_h, self.chat_w)
+            self.input_win.mvwin(self.chat_h, 0)
 
     def _draw_all(self) -> None:
         """
@@ -205,16 +238,17 @@ class View:
 
     def _draw_chat(self) -> None:
         """
-        Render chat messages with bubble framing and syntax-highlighted code.
+        Render chat pane, unless sidebar is maximized.
         """
+        if self.sidebar_maximized:
+            return
+
         win = self.chat_win
         win.erase()
         win.box()
         win.addstr(0, 2, " Chat ", self.default_attr)
 
         flat = self._flatten_chat()
-        self.last_chat_map = flat
-
         visible = self.chat_h - 2
         total = len(flat)
         max_off = max(0, total - visible)
@@ -235,7 +269,7 @@ class View:
 
     def _draw_sidebar(self) -> None:
         """
-        Render the sidebar (full-height) with scrolling.
+        Render the sidebar (full-height) with title and always scroll to bottom.
         """
         win = self.sidebar_win
         win.erase()
@@ -243,15 +277,23 @@ class View:
         win.addstr(0, 2, " Terminal Session ", self.default_attr)
 
         flat = self._flatten_sidebar()
-        visible = self.height - 2
+        # determine visible area from the window itself
+        height, width = win.getmaxyx()
+        visible = height - 2
         total = len(flat)
         max_off = max(0, total - visible)
-        self.sidebar_offset = min(max_off, max(0, self.sidebar_offset))
 
+        # always snap to bottom
+        self.sidebar_offset = max_off
+
+        # draw only the bottom-most slice
         for row, (text, attr) in enumerate(
             flat[self.sidebar_offset : self.sidebar_offset + visible], start=1
         ):
-            win.addstr(row, 1, text, attr)
+            try:
+                win.addstr(row, 1, text[: width - 2], attr)
+            except curses.error:
+                pass
 
         win.refresh()
 
@@ -458,18 +500,25 @@ class View:
 
     def _flatten_sidebar(self) -> List[Tuple[str, int]]:
         """
-        Flatten tool calls into a list of (line, attribute) for rendering.
+        Flatten tool calls into a list of (line, attribute) tuples for rendering.
+        - Commands are prefixed with the current working directory + '$ '
+          and wrapped to fit the sidebar, rendered with self.cmd_attr.
+        - Outputs are wrapped to fit the sidebar and rendered with self.default_attr.
         """
         out: List[Tuple[str, int]] = []
         max_inner = self.sidebar_w - 2
+        prompt = f"{os.getcwd()} $ "
 
         for call in self.tool_calls:
             for cmd, output in call.items():
-                out.append((cmd[:max_inner], self.cmd_attr))
-                for ln in output.splitlines():
-                    text = ln[:max_inner]
-                    pad = " " * (max_inner - len(text))
-                    out.append((text + pad, self.code_attr))
+                # wrap the prompt+command
+                for line in textwrap.wrap(prompt + cmd, width=max_inner) or [""]:
+                    out.append((line.ljust(max_inner), self.cmd_attr))
+                # wrap each paragraph of the output
+                for para in output.splitlines():
+                    for line in textwrap.wrap(para, width=max_inner) or [""]:
+                        out.append((line.ljust(max_inner), self.default_attr))
+                # blank separator
                 out.append((" " * max_inner, self.default_attr))
 
         return out
@@ -538,9 +587,13 @@ class View:
                 self._handle_mouse()
                 continue
 
-            if key == curses.KEY_F2:
+            elif key == curses.KEY_F2:
                 self.show_debug = True
                 continue
+
+            elif key == curses.KEY_F1:
+                self.sidebar_maximized = not self.sidebar_maximized
+                self._recalculate_layout()
 
             # Enter / Return: send or, in a paste burst, insert space
             if key in (curses.KEY_ENTER, 10, 13):
