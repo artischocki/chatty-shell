@@ -185,7 +185,7 @@ class View:
         """
         h, w = stdscr.getmaxyx()
         self.height, self.width = h, w
-        self.sidebar_w = max(20, w // 4)
+        self.sidebar_w = max(20, int(w // 2.5))
         self.chat_w = w - self.sidebar_w
         # input_h already set (default 3 or dynamic)
         self.chat_h = self.height - self.input_h
@@ -672,10 +672,15 @@ class View:
 
         burst = len(keys) > 1
         for key in keys:
+            # exit
+            if key == 4:  # Ctrl D
+                exit()  # TODO kill all subprocesses
+
             # switch focus
             if key == 572:  # CTRL + Right
                 self.focus = "terminal"
                 return
+
             if key == 557:  # CTRL + Left
                 self.focus = "chat"
                 return
@@ -688,6 +693,11 @@ class View:
             # debug
             if key == curses.KEY_F2:
                 self.show_debug = True
+                return
+
+            # maximize terminal
+            if key == curses.KEY_F1:
+                self.sidebar_maximized = not self.sidebar_maximized
                 return
 
             # input handling per-focus
