@@ -29,7 +29,9 @@ class View:
         ai_queue: Queue,
         popup_queue: Queue,
         popup_response_queue: Queue,
+        logger,
     ):
+        self.logger = logger
         # default input height (will grow later in _recalculate_layout)
         self.input_h = 3
 
@@ -44,6 +46,12 @@ class View:
         self.input_buffer: str = ""
         self.chat_offset: int = 0
         self.chat_scroll_speed: int = 3
+
+        # Terminal input buffer...
+        self.terminal_input_buffer: str = ""
+
+        # focus: "chat" or "terminal"
+        self.focus = "chat"
 
         # Sidebar state...
         self.sidebar_offset: int = 0
@@ -85,6 +93,8 @@ class View:
         self._init_windows(stdscr)
         self.input_win.nodelay(True)
         self.input_win.keypad(True)
+        self.terminal_input_win.nodelay(True)
+        self.terminal_input_win.keypad(True)
 
         while True:
             # 1) check for new popup requests
@@ -164,15 +174,15 @@ class View:
 
     def _init_windows(self, stdscr) -> None:
         """
-        Create and initialize the chat, sidebar, input, and debug windows.
-        Chat + input share the left width; sidebar runs full height on the right.
+        Create chat pane, terminal pane, chat input (bottom-left),
+        and terminal input (bottom-right), plus full-screen debug.
         """
         h, w = stdscr.getmaxyx()
         self.height, self.width = h, w
         self.sidebar_w = max(20, w // 4)
         self.chat_w = w - self.sidebar_w
-        # input_h was set by _recalculate_layout (or defaults to 3)
-        self.chat_h = h - self.input_h
+        # input_h already set (default 3 or dynamic)
+        self.chat_h = self.height - self.input_h
 
         def setup(win):
             win.bkgd(" ", self.default_attr)
@@ -180,17 +190,26 @@ class View:
             win.box()
             win.refresh()
 
-        # left: chat area
+        # chat window (left)
         self.chat_win = curses.newwin(self.chat_h, self.chat_w, 0, 0)
         setup(self.chat_win)
-        # right: sidebar full height
-        self.sidebar_win = curses.newwin(self.height, self.sidebar_w, 0, self.chat_w)
+
+        # terminal window (right, above its input)
+        self.sidebar_win = curses.newwin(self.chat_h, self.sidebar_w, 0, self.chat_w)
         setup(self.sidebar_win)
-        # bottom-left: input, same width as chat
+
+        # chat input (bottom-left)
         self.input_win = curses.newwin(self.input_h, self.chat_w, self.chat_h, 0)
         setup(self.input_win)
-        # full-screen debug overlay
-        self.debug_win = curses.newwin(self.height, w, 0, 0)
+
+        # terminal input (bottom-right)
+        self.terminal_input_win = curses.newwin(
+            self.input_h, self.sidebar_w, self.chat_h, self.chat_w
+        )
+        setup(self.terminal_input_win)
+
+        # debug overlay (full screen)
+        self.debug_win = curses.newwin(h, w, 0, 0)
         setup(self.debug_win)
 
     def _recalculate_layout(self) -> None:
@@ -234,6 +253,7 @@ class View:
         self._draw_chat()
         self._draw_sidebar()
         self._draw_input()
+        self._draw_terminal_input()
         self._refresh()
 
     def _draw_chat(self) -> None:
@@ -299,9 +319,9 @@ class View:
 
     def _draw_input(self) -> None:
         """
-        Draw the input window with a '> ' prompt on the first line,
+        Draw the chat input window with a '> ' prompt on the first line,
         wrap text to the chat pane width, and render a synthetic cursor
-        that advances even when typing spaces.
+        only if chat input has focus.
         """
         win = self.input_win
         win.erase()
@@ -325,25 +345,52 @@ class View:
             prefix = "> " if idx == 1 else "  "
             win.addstr(idx, 1, prefix + line, self.default_attr)
 
-        # Synthetic cursor position based on raw buffer (so spaces count)
-        raw_last = paras[-1]
-        col_offset = len(raw_last) % inner_w
-        if raw_last and col_offset == 0:
-            col_offset = inner_w
+        # Synthetic cursor only when chat input is focused
+        if self.focus == "chat":
+            raw_last = paras[-1]
+            col_offset = len(raw_last) % inner_w
+            if raw_last and col_offset == 0:
+                col_offset = inner_w
 
-        cursor_row = len(display)
-        prefix_len = 2
-        cursor_col = 1 + prefix_len + col_offset
-        max_col = self.chat_w - 2
-        if cursor_col > max_col:
-            cursor_col = max_col
+            cursor_row = len(display)
+            prefix_len = 2
+            cursor_col = 1 + prefix_len + col_offset
+            max_col = self.chat_w - 2
+            if cursor_col > max_col:
+                cursor_col = max_col
 
-        # Draw the cursor as a reversed character or blank
-        try:
-            ch = win.inch(cursor_row, cursor_col) & 0xFF
-            win.addch(cursor_row, cursor_col, ch, curses.A_REVERSE)
-        except curses.error:
-            win.addstr(cursor_row, cursor_col, " ", curses.A_REVERSE)
+            try:
+                ch = win.inch(cursor_row, cursor_col) & 0xFF
+                win.addch(cursor_row, cursor_col, ch, curses.A_REVERSE)
+            except curses.error:
+                win.addstr(cursor_row, cursor_col, " ", curses.A_REVERSE)
+
+        win.refresh()
+
+    def _draw_terminal_input(self) -> None:
+        """
+        Draw the terminal input window with a '$ ' prompt,
+        wrap text to the sidebar width, and render a synthetic cursor
+        only if terminal input has focus.
+        """
+        win = self.terminal_input_win
+        win.erase()
+        win.box()
+
+        inner_w = self.sidebar_w - 4  # account for borders + prompt
+        prefix = "$ "
+        text = prefix + self.terminal_input_buffer
+        display = text[:inner_w].ljust(inner_w)
+        win.addstr(1, 1, display, self.default_attr)
+
+        # Synthetic cursor only when terminal input is focused
+        if self.focus == "terminal":
+            cursor_col = 1 + min(len(text), inner_w)
+            try:
+                ch = win.inch(1, cursor_col) & 0xFF
+                win.addch(1, cursor_col, ch, curses.A_REVERSE)
+            except curses.error:
+                win.addstr(1, cursor_col, " ", curses.A_REVERSE)
 
         win.refresh()
 
@@ -484,6 +531,7 @@ class View:
         self.chat_win.noutrefresh()
         self.sidebar_win.noutrefresh()
         self.input_win.noutrefresh()
+        self.terminal_input_win.noutrefresh()
         curses.doupdate()
 
     def _flatten_chat(self) -> List[Tuple[str, str, bool]]:
@@ -572,9 +620,12 @@ class View:
         Any Enter (KEY_ENTER, 10, 13) sends the message,
         unless part of a multi-key paste (then treated as space).
         """
+        # Select which window to read from
+        win = self.input_win if self.focus == "chat" else self.terminal_input_win
+
         keys: List[int] = []
         while True:
-            k = self.input_win.getch()
+            k = win.getch()
             if k == -1:
                 break
             keys.append(k)
@@ -583,35 +634,45 @@ class View:
 
         burst = len(keys) > 1
         for key in keys:
+            # switch focus
+            if key == 572:  # CTRL + Right
+                self.focus = "terminal"
+                return
+            if key == 557:  # CTRL + Left
+                self.focus = "chat"
+                return
+
+            # mouse events
             if key == curses.KEY_MOUSE:
                 self._handle_mouse()
-                continue
+                return
 
-            elif key == curses.KEY_F2:
+            # debug
+            if key == curses.KEY_F2:
                 self.show_debug = True
-                continue
+                return
 
-            elif key == curses.KEY_F1:
-                self.sidebar_maximized = not self.sidebar_maximized
-                self._recalculate_layout()
+            # input handling per-focus
+            if self.focus == "chat":
+                if key in (curses.KEY_ENTER, 10, 13):
+                    if burst:
+                        self.input_buffer += " "
+                    else:
+                        self._send_human()
+                elif key in (curses.KEY_BACKSPACE, 127, 8):
+                    self.input_buffer = self.input_buffer[:-1]
+                elif 32 <= key < 256:
+                    self.input_buffer += chr(key)
 
-            # Enter / Return: send or, in a paste burst, insert space
-            if key in (curses.KEY_ENTER, 10, 13):
-                if burst:
-                    self.input_buffer += " "
-                else:
-                    self._send_human()
-                continue
-
-            if key in (curses.KEY_BACKSPACE, 127, 8):
-                self.input_buffer = self.input_buffer[:-1]
-                continue
-
-            if key == 27:  # ESC
-                exit()
-
-            if 32 <= key < 256:
-                self.input_buffer += chr(key)
+            else:  # terminal focus
+                if key in (curses.KEY_ENTER, 10, 13):
+                    # for now, just clear or leave placeholder
+                    # actual send logic to be implemented later
+                    self.terminal_input_buffer = ""
+                elif key in (curses.KEY_BACKSPACE, 127, 8):
+                    self.terminal_input_buffer = self.terminal_input_buffer[:-1]
+                elif 32 <= key < 256:
+                    self.terminal_input_buffer += chr(key)
 
     def _send_human(self) -> None:
         """

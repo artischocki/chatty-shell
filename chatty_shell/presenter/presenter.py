@@ -24,6 +24,7 @@ class Presenter:
             ai_queue=self.ai_queue,
             popup_queue=self.popup_queue,
             popup_response_queue=self.popup_response_queue,
+            logger=self.logger,
         )
         self.view_proc = Process(target=self.view.run, daemon=True)
         self.view_proc.start()
