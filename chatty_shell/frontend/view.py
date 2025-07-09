@@ -78,6 +78,12 @@ class View:
         self.popup_y = 0
         self.popup_x = 0
 
+        # Loading spinner state
+        self.loading: bool = False
+        self.spinner_frames = ["⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇"]
+
+        self.spinner_idx = 0
+
     def run(self) -> None:
         """
         Launch the curses application.
@@ -258,11 +264,9 @@ class View:
 
     def _draw_chat(self) -> None:
         """
-        Render chat pane, unless sidebar is maximized.
+        Render the chat pane, showing chat bubbles and animating a spinner
+        for any 'ai_loading' placeholder.
         """
-        if self.sidebar_maximized:
-            return
-
         win = self.chat_win
         win.erase()
         win.box()
@@ -274,16 +278,30 @@ class View:
         max_off = max(0, total - visible)
         self.chat_offset = min(max_off, max(0, self.chat_offset))
 
-        segment = flat[self.chat_offset : self.chat_offset + visible]
-        for row, (text, who, is_code) in enumerate(segment, start=1):
-            x = 1 if who == "ai" else self.chat_w - len(text) - 1
+        start = self.chat_offset
+        end = start + visible
+        row = 1
+
+        for line_text, who, is_code in flat[start:end]:
+            x = 1 if who.startswith("ai") else self.chat_w - len(line_text) - 1
+
             if not is_code:
-                win.addstr(row, x, text, self.default_attr)
+                win.addstr(row, x, line_text, self.default_attr)
             else:
-                left, inner, right = text[:2], text[2:-2], text[-2:]
+                # split border vs code content
+                left = line_text[:2]
+                inner = line_text[2:-2]
+                right = line_text[-2:]
                 win.addstr(row, x, left, self.default_attr)
                 win.addstr(row, x + 2, inner, self.code_attr)
                 win.addstr(row, x + 2 + len(inner), right, self.default_attr)
+
+            row += 1
+
+        # Advance spinner for next frame if still loading
+        if self.loading:
+            time.sleep(0.05)
+            self.spinner_idx = (self.spinner_idx + 1) % len(self.spinner_frames)
 
         win.refresh()
 
@@ -536,15 +554,29 @@ class View:
 
     def _flatten_chat(self) -> List[Tuple[str, str, bool]]:
         """
-        Flatten chat messages into a list of (line, author, is_code) for rendering.
+        Build a flat list of (line, who, is_code) for each chat bubble line.
+        Applies the loading spinner to 'ai_loading' bubbles.
         """
-        lines: List[Tuple[str, str, bool]] = []
-        max_inner = self.chat_w - 2
+        flat: List[Tuple[str, str, bool]] = []
+        inner_w = self.chat_w - 2
 
         for msg, who in self.messages:
-            for text, is_code in wrap_message(msg, max_inner, who):
-                lines.append((text, who, is_code))
-        return lines
+            # Determine bubble type for wrapping
+            bubble_type = "ai" if who.startswith("ai") else "human"
+            # Get framed lines; wrap_message returns List[Tuple[str, bool]]
+            bubble = wrap_message(msg, inner_w, bubble_type)
+
+            # If this is a loading placeholder, swap the emoji for spinner
+            if who == "ai_loading" and bubble:
+                frame = self.spinner_frames[self.spinner_idx]
+                line, is_code = bubble[0]
+                bubble[0] = (line[:-1] + frame, is_code)
+
+            # Append each line of this bubble
+            for line_text, is_code in bubble:
+                flat.append((line_text, who, is_code))
+
+        return flat
 
     def _flatten_sidebar(self) -> List[Tuple[str, int]]:
         """
@@ -574,25 +606,31 @@ class View:
     def _drain_ai_queue(self) -> None:
         """
         Process incoming AI messages and tool calls,
-        and autoscroll chat and sidebar if each was already at its bottom.
+        replace loading placeholder, and autoscroll if needed.
         """
         chat_at_bottom = self.chat_offset == self._max_chat_offset()
         sidebar_at_bottom = self.sidebar_offset == self._max_sidebar_offset()
 
-        # drain all queued AI/tool events
         while not self.ai_queue.empty():
             calls, ai_msg = self.ai_queue.get()
-
-            # record the raw tool calls
+            # record tool calls…
             if isinstance(calls, dict):
                 self.tool_calls.append(calls)
             else:
                 self.tool_calls.extend(calls)
 
-            # append the AI chat message
+            # replace placeholder
+            if self.loading:
+                # remove first ai_loading entry
+                for i, (_, who) in enumerate(self.messages):
+                    if who == "ai_loading":
+                        del self.messages[i]
+                        break
+                self.loading = False
+
+            # append real AI response
             self.messages.append((ai_msg, "ai"))
 
-        # if we were viewing the bottom, stay pinned to new bottom
         if chat_at_bottom:
             self.chat_offset = self._max_chat_offset()
         if sidebar_at_bottom:
@@ -676,15 +714,21 @@ class View:
 
     def _send_human(self) -> None:
         """
-        Send the current input buffer as a human message if non-empty.
+        Send the current input buffer as a human message if non-empty,
+        then insert a loading placeholder for the AI.
         """
-        # Prevent sending empty or whitespace-only messages
         if not self.input_buffer.strip():
             return
 
         at_bottom = self.chat_offset == self._max_chat_offset()
+        # 1) send human
         self.human_queue.put(self.input_buffer)
         self.messages.append((self.input_buffer, "human"))
+        # 2) insert loading placeholder
+        self.loading = True
+        self.spinner_idx = 0
+        self.messages.append(("Loading...", "ai_loading"))
+
         self.input_buffer = ""
         if at_bottom:
             self.chat_offset = self._max_chat_offset()
