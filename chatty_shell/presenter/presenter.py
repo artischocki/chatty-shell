@@ -16,7 +16,7 @@ class Presenter:
 
         # logger
         self.logger = logging.getLogger()
-        logging.basicConfig(filename="debug.log", filemode="w", level=logging.DEBUG)
+        logging.basicConfig(filemode="w", level=logging.DEBUG)
 
         # start the View with three queues
         self.view = View(
